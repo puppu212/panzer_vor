@@ -3,8 +3,8 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>PANZER VOR!</title>
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@900&display=swap" rel="stylesheet">
+    <title>PANZER VOR! - BLINK START</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;900&display=swap" rel="stylesheet">
     <style>
         body {
             background: #bc1000;
@@ -19,6 +19,7 @@
         canvas {
             background: #000;
             border: 10px solid #fff;
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.5);
         }
     </style>
 </head>
@@ -66,7 +67,6 @@
         });
 
         function startGame() { gameStarted = true; if (!isMusicPlaying) { bgm.play().catch(() => { }); isMusicPlaying = true; } }
-
         function resetGame() {
             player.x = 150; player.y = 450;
             bullets = []; enemyBullets = []; enemies = []; particles = []; scrapItems = []; items = [];
@@ -103,9 +103,7 @@
             }
         }
 
-        function spawnRepairItem(x, y) {
-            items.push({ x: x, y: y, width: 80, height: 80, speed: 2 });
-        }
+        function spawnRepairItem(x, y) { items.push({ x: x, y: y, width: 80, height: 80, speed: 2 }); }
 
         function rectIntersect(x1, y1, w1, h1, x2, y2, w2, h2) {
             return x2 < x1 + w1 && x2 + w2 > x1 && y2 < y1 + h1 && y2 + h2 > y1;
@@ -124,21 +122,17 @@
             if (player.recoil > 0) player.recoil *= 0.8;
             if (invincibleTimer > 0) invincibleTimer--;
 
-            // 射撃ロジック：コンボ数で弾数変化
             if (keys["Space"]) {
                 const now = Date.now();
                 if (now - lastShotTime > shotInterval) {
                     if (comboCount >= 20) {
-                        // 3連装 (中央、左斜め、右斜め)
                         bullets.push({ x: player.x + 30, y: player.y, width: 40, height: 40, vx: 0, vy: -7 });
                         bullets.push({ x: player.x + 10, y: player.y + 10, width: 40, height: 40, vx: -1.5, vy: -6.5 });
                         bullets.push({ x: player.x + 50, y: player.y + 10, width: 40, height: 40, vx: 1.5, vy: -6.5 });
                     } else if (comboCount >= 10) {
-                        // 2連装 (平行)
                         bullets.push({ x: player.x + 15, y: player.y, width: 40, height: 40, vx: 0, vy: -7 });
                         bullets.push({ x: player.x + 45, y: player.y, width: 40, height: 40, vx: 0, vy: -7 });
                     } else {
-                        // 通常 (1発)
                         bullets.push({ x: player.x + 30, y: player.y, width: 40, height: 40, vx: 0, vy: -7 });
                     }
                     lastShotTime = now; player.recoil = 10;
@@ -146,8 +140,7 @@
             }
 
             for (let i = bullets.length - 1; i >= 0; i--) {
-                bullets[i].x += bullets[i].vx;
-                bullets[i].y += bullets[i].vy;
+                bullets[i].x += bullets[i].vx; bullets[i].y += bullets[i].vy;
                 if (bullets[i].y < -40 || bullets[i].x < -40 || bullets[i].x > canvas.width) bullets.splice(i, 1);
             }
 
@@ -172,24 +165,19 @@
                     let bSize = en.type === "KV1" ? 60 : 40;
                     enemyBullets.push({ x: en.x + 30, y: en.y + 80, width: bSize, height: bSize, speed: en.type === "KV1" ? 7 : 5 });
                 }
-
                 if (rectIntersect(player.x + 30, player.y + 30, 40, 40, en.x + (en.width - en.hitWidth) / 2, en.y + (en.height - en.hitHeight) / 2, en.hitWidth, en.hitHeight)) takeDamage();
-
                 for (let bi = bullets.length - 1; bi >= 0; bi--) {
                     let b = bullets[bi];
                     if (rectIntersect(en.x + (en.width - en.hitWidth) / 2, en.y + (en.height - en.hitHeight) / 2, en.hitWidth, en.hitHeight, b.x, b.y, b.width, b.height)) {
                         bullets.splice(bi, 1); en.hp--;
                         if (en.hp <= 0) {
-                            comboCount++; comboTimer = COMBO_MAX_TIME;
-                            score += en.score + (comboCount * 5);
+                            comboCount++; comboTimer = COMBO_MAX_TIME; score += en.score + (comboCount * 5);
                             createExplosion(en.x + en.width / 2, en.y + en.height / 2, "#ff6600");
                             createScrap(en.x + en.width / 2, en.y + en.height / 2, en.type === "KV1");
                             let dropChance = en.type === "KV1" ? 0.35 : 0.03;
                             if (Math.random() < dropChance) spawnRepairItem(en.x + en.width / 2 - 40, en.y + en.height / 2);
                             enemies.splice(i, 1); shakeDuration = 15;
-                        } else {
-                            for (let k = 0; k < 5; k++) createExplosion(b.x + b.width / 2, b.y, "#ffffff");
-                        }
+                        } else { for (let k = 0; k < 5; k++) createExplosion(b.x + b.width / 2, b.y, "#ffffff"); }
                         break;
                     }
                 }
@@ -215,54 +203,64 @@
             if (!gameStarted) { drawTitle(); } else {
                 scrapItems.forEach(s => { ctx.save(); if (s.type === "smoke") { ctx.globalAlpha = s.alpha; ctx.fillStyle = "#222"; } else { ctx.fillStyle = s.color; } ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2); ctx.fill(); ctx.restore(); });
                 items.forEach(it => { if (repairImg.complete && repairImg.naturalWidth > 0) ctx.drawImage(repairImg, it.x, it.y, it.width, it.height); else { ctx.fillStyle = "#0f0"; ctx.fillRect(it.x + 30, it.y + 10, 20, 60); ctx.fillRect(it.x + 10, it.y + 30, 60, 20); } });
-
                 if (!(invincibleTimer > 0 && Math.floor(Date.now() / 100) % 2 === 0)) ctx.drawImage(playerImg, player.x, player.y + player.recoil, player.width, player.height);
-
                 bullets.forEach(b => ctx.drawImage(bulletImg, b.x, b.y, b.width, b.height));
                 enemyBullets.forEach(eb => ctx.drawImage(enemyBulletImg, eb.x, eb.y, eb.width, eb.height));
                 enemies.forEach(en => ctx.drawImage(en.type === "KV1" ? kv1Img : enemyImg, en.x, en.y, en.width, en.height));
                 particles.forEach(p => { ctx.globalAlpha = p.alpha; ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill(); });
 
-                ctx.globalAlpha = 1.0;
-                ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "900 24px 'Montserrat', sans-serif";
+                ctx.globalAlpha = 1.0; ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "900 24px 'Montserrat', sans-serif";
                 ctx.fillText(`SCORE: ${score}`, 10, 35); ctx.fillText(`BEST: ${highScore}`, 10, 65);
                 ctx.fillStyle = "#bc1000"; ctx.fillText("LIVES: " + "❤".repeat(lives), 10, 95);
 
                 if (comboCount > 1) {
-                    // コンボ数に応じて色を変える演出
-                    ctx.textAlign = "right";
-                    ctx.fillStyle = comboCount >= 20 ? "#ff0000" : (comboCount >= 10 ? "#ffaa00" : "#ffcc00");
+                    ctx.textAlign = "right"; ctx.fillStyle = comboCount >= 20 ? "#ff0000" : (comboCount >= 10 ? "#ffaa00" : "#ffcc00");
                     ctx.font = "900 40px 'Montserrat', sans-serif"; ctx.fillText(`${comboCount} COMBO`, canvas.width - 20, 150);
                     ctx.fillRect(canvas.width - 120, 165, 100 * (comboTimer / COMBO_MAX_TIME), 8);
-
-                    // パワーアップ状態のテキスト
-                    ctx.font = "900 14px 'Montserrat', sans-serif";
-                    let mode = comboCount >= 20 ? "MAX POWER: 3-WAY" : (comboCount >= 10 ? "DUAL SHOT" : "");
-                    ctx.fillText(mode, canvas.width - 20, 185);
                 }
                 if (gameOver) drawGameOver();
             }
             ctx.restore();
         }
 
-        function drawTitle() { ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "white"; ctx.font = "900 48px 'Montserrat', sans-serif"; ctx.fillText("PANZER VOR!", canvas.width / 2, 200); ctx.font = "900 18px 'Montserrat', sans-serif"; ctx.fillText("1944: SCHLACHT IM OSTEN", canvas.width / 2, 260); ctx.fillStyle = "#bc1000"; ctx.font = "900 22px 'Montserrat', sans-serif"; ctx.fillText("CLICK or PRESS ENTER", canvas.width / 2, 420); }
+        function drawTitle() {
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillStyle = "white"; ctx.font = "900 48px 'Montserrat', sans-serif";
+            ctx.fillText("PANZER VOR!", canvas.width / 2, 120);
 
-        function drawGameOver() { ctx.fillStyle = "rgba(0, 0, 0, 0.7)"; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#bc1000"; ctx.font = "900 48px 'Montserrat', sans-serif"; ctx.fillText("GAME OVER", canvas.width / 2, 200); ctx.fillStyle = "white"; ctx.font = "900 30px 'Montserrat', sans-serif"; ctx.fillText(`SCORE: ${score}`, canvas.width / 2, 270); ctx.fillStyle = "#bc1000"; ctx.fillRect(90, 350, 220, 50); ctx.strokeStyle = "white"; ctx.lineWidth = 2; ctx.strokeRect(90, 350, 220, 50); ctx.fillStyle = "white"; ctx.font = "900 22px 'Montserrat', sans-serif"; ctx.fillText("REPLAY", canvas.width / 2, 375); }
+            ctx.font = "900 16px 'Montserrat', sans-serif";
+            ctx.fillStyle = "#aaa";
+            ctx.fillText("--- HOW TO PLAY ---", canvas.width / 2, 200);
 
-        function gameLoop() { update(); draw(); requestAnimationFrame(gameLoop); }
+            ctx.fillStyle = "white"; ctx.font = "700 18px 'Montserrat', sans-serif";
+            ctx.fillText("MOVE: WASD", canvas.width / 2, 240);
+            ctx.fillText("FIRE: SPACE BAR", canvas.width / 2, 275);
 
-        let loadedCount = 0;
-        const totalImages = 6;
-        function checkLoad() {
-            loadedCount++;
-            if (loadedCount >= totalImages && !isLoopRunning) {
-                isLoopRunning = true;
-                gameLoop();
+            ctx.fillStyle = "#ffcc00";
+            ctx.fillText("10+ COMBO: DUAL SHOT", canvas.width / 2, 330);
+            ctx.fillText("20+ COMBO: 3-WAY SHOT", canvas.width / 2, 360);
+
+            // ★ここを修正：赤文字だけを点滅させる
+            if (Math.floor(Date.now() / 500) % 2 === 0) {
+                ctx.fillStyle = "#bc1000"; ctx.font = "900 22px 'Montserrat', sans-serif";
+                ctx.fillText("PRESS SPACE BAR TO START", canvas.width / 2, 460);
             }
         }
+
+        function drawGameOver() {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.7)"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#bc1000";
+            ctx.font = "900 48px 'Montserrat', sans-serif"; ctx.fillText("GAME OVER", canvas.width / 2, 200);
+            ctx.fillStyle = "white"; ctx.font = "900 30px 'Montserrat', sans-serif"; ctx.fillText(`SCORE: ${score}`, canvas.width / 2, 270);
+            ctx.fillStyle = "#bc1000"; ctx.fillRect(90, 350, 220, 50); ctx.strokeStyle = "white"; ctx.lineWidth = 2; ctx.strokeRect(90, 350, 220, 50);
+            ctx.fillStyle = "white"; ctx.font = "900 22px 'Montserrat', sans-serif"; ctx.fillText("REPLAY", canvas.width / 2, 375);
+        }
+
+        function gameLoop() { update(); draw(); requestAnimationFrame(gameLoop); }
+        let loadedCount = 0; const totalImages = 6;
+        function checkLoad() { loadedCount++; if (loadedCount >= totalImages && !isLoopRunning) { isLoopRunning = true; gameLoop(); } }
         playerImg.onload = enemyImg.onload = kv1Img.onload = bulletImg.onload = enemyBulletImg.onload = repairImg.onload = checkLoad;
         setTimeout(() => { if (!isLoopRunning) { isLoopRunning = true; gameLoop(); } }, 2000);
-
     </script>
 </body>
 
