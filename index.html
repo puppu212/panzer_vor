@@ -3,7 +3,8 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>PANZER VOR!</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PANZER VOR! - Classic Feel</title>
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;900&display=swap" rel="stylesheet">
     <style>
         body {
@@ -14,12 +15,16 @@
             height: 100vh;
             margin: 0;
             overflow: hidden;
+            touch-action: none;
         }
 
         canvas {
             background: #000;
             border: 10px solid #fff;
             box-shadow: 0 0 50px rgba(0, 0, 0, 0.5);
+            max-width: 100%;
+            max-height: 100vh;
+            object-fit: contain;
         }
     </style>
 </head>
@@ -50,11 +55,17 @@
         bgm.loop = true; bgm.volume = 0.15;
         let isMusicPlaying = false;
 
+        // --- サイズと速度をPC版(100px / speed:4)に完全準拠 ---
         let player = { x: 150, y: 450, width: 100, height: 100, hitWidth: 40, hitHeight: 40, speed: 4, recoil: 0 };
         let bullets = [], enemyBullets = [], enemies = [], particles = [], scrapItems = [], items = [], keys = {};
+        let touchX = null, touchY = null;
         let lastShotTime = 0, shotInterval = 250;
         let shakeDuration = 0, shakeIntensity = 5, healEffect = 0;
 
+        // 速度補正用の変数
+        let lastTime = performance.now();
+
+        // 入力制御
         window.addEventListener("keydown", e => {
             keys[e.code] = true;
             if ((e.code === "Enter" || e.code === "Space")) {
@@ -62,9 +73,28 @@
             }
         });
         window.addEventListener("keyup", e => keys[e.code] = false);
-        canvas.addEventListener("click", () => {
-            if (!gameStarted) startGame(); else if (gameOver) resetGame();
+
+        canvas.addEventListener("touchstart", e => {
+            e.preventDefault();
+            if (!gameStarted) { startGame(); return; }
+            if (gameOver) { resetGame(); return; }
+            updateTouchPos(e.touches[0]);
+        }, { passive: false });
+
+        canvas.addEventListener("touchmove", e => {
+            e.preventDefault();
+            updateTouchPos(e.touches[0]);
+        }, { passive: false });
+
+        canvas.addEventListener("touchend", () => {
+            touchX = null; touchY = null;
         });
+
+        function updateTouchPos(touch) {
+            const rect = canvas.getBoundingClientRect();
+            touchX = (touch.clientX - rect.left) * (canvas.width / rect.width);
+            touchY = (touch.clientY - rect.top) * (canvas.height / rect.height);
+        }
 
         function startGame() { gameStarted = true; if (!isMusicPlaying) { bgm.play().catch(() => { }); isMusicPlaying = true; } }
         function resetGame() {
@@ -109,20 +139,32 @@
             return x2 < x1 + w1 && x2 + w2 > x1 && y2 < y1 + h1 && y2 + h2 > y1;
         }
 
-        function update() {
+        function update(dt) {
             if (!gameStarted || gameOver) return;
-            if (comboTimer > 0) comboTimer--; else comboCount = 0;
-            if (healEffect > 0) healEffect -= 0.02;
+            if (comboTimer > 0) comboTimer -= dt; else comboCount = 0;
+            if (healEffect > 0) healEffect -= 0.02 * dt;
 
-            if ((keys["KeyW"] || keys["ArrowUp"]) && player.y > 0) player.y -= player.speed;
-            if ((keys["KeyS"] || keys["ArrowDown"]) && player.y < canvas.height - player.height) player.y += player.speed;
-            if ((keys["KeyA"] || keys["ArrowLeft"]) && player.x > 0) player.x -= player.speed;
-            if ((keys["KeyD"] || keys["ArrowRight"]) && player.x < canvas.width - player.width) player.x += player.speed;
+            // PC移動
+            if ((keys["KeyW"] || keys["ArrowUp"]) && player.y > 0) player.y -= player.speed * dt;
+            if ((keys["KeyS"] || keys["ArrowDown"]) && player.y < canvas.height - player.height) player.y += player.speed * dt;
+            if ((keys["KeyA"] || keys["ArrowLeft"]) && player.x > 0) player.x -= player.speed * dt;
+            if ((keys["KeyD"] || keys["ArrowRight"]) && player.x < canvas.width - player.width) player.x += player.speed * dt;
 
-            if (player.recoil > 0) player.recoil *= 0.8;
-            if (invincibleTimer > 0) invincibleTimer--;
+            // スマホ移動 (PC版の速度感に合わせるため追従をマイルドに)
+            if (touchX !== null && touchY !== null) {
+                const targetX = touchX - player.width / 2;
+                const targetY = touchY - player.height / 2 - 40;
+                player.x += (targetX - player.x) * 0.1 * dt;
+                player.y += (targetY - player.y) * 0.1 * dt;
+                player.x = Math.max(0, Math.min(canvas.width - player.width, player.x));
+                player.y = Math.max(0, Math.min(canvas.height - player.height, player.y));
+            }
 
-            if (keys["Space"]) {
+            if (player.recoil > 0) player.recoil *= Math.pow(0.8, dt);
+            if (invincibleTimer > 0) invincibleTimer -= dt;
+
+            const isFiring = keys["Space"] || (touchX !== null);
+            if (isFiring) {
                 const now = Date.now();
                 if (now - lastShotTime > shotInterval) {
                     if (comboCount >= 20) {
@@ -140,28 +182,27 @@
             }
 
             for (let i = bullets.length - 1; i >= 0; i--) {
-                bullets[i].x += bullets[i].vx; bullets[i].y += bullets[i].vy;
+                bullets[i].x += bullets[i].vx * dt; bullets[i].y += bullets[i].vy * dt;
                 if (bullets[i].y < -40 || bullets[i].x < -40 || bullets[i].x > canvas.width) bullets.splice(i, 1);
             }
 
             for (let i = items.length - 1; i >= 0; i--) {
-                let it = items[i]; it.y += it.speed;
+                let it = items[i]; it.y += it.speed * dt;
                 if (rectIntersect(player.x + 10, player.y + 10, 80, 80, it.x, it.y, it.width, it.height)) {
                     if (lives < MAX_LIVES) { lives++; healEffect = 0.4; } else { score += 500; healEffect = 0.15; }
-                    comboTimer = COMBO_MAX_TIME; items.splice(i, 1);
+                    items.splice(i, 1);
                 } else if (it.y > canvas.height) items.splice(i, 1);
             }
 
             let spawnRate = Math.min(0.02 + (score / 10000), 0.1);
-            if (Math.random() < spawnRate && enemies.length < 6) {
+            if (Math.random() < spawnRate * dt && enemies.length < 6) {
                 const isKV1 = Math.random() < 0.12;
                 enemies.push({ x: Math.random() * (canvas.width - 100), y: -120, width: isKV1 ? 120 : 100, height: isKV1 ? 120 : 100, hitWidth: isKV1 ? 80 : 60, hitHeight: isKV1 ? 80 : 60, speed: isKV1 ? 1.5 : (2 + Math.min(score / 2000, 3.5)), hp: isKV1 ? 3 : 1, type: isKV1 ? "KV1" : "normal", score: isKV1 ? 50 : 10 });
             }
 
             for (let i = enemies.length - 1; i >= 0; i--) {
-                let en = enemies[i]; en.y += en.speed;
-                let fireChance = en.type === "KV1" ? 0.015 : 0.006;
-                if (Math.random() < fireChance) {
+                let en = enemies[i]; en.y += en.speed * dt;
+                if (Math.random() < (en.type === "KV1" ? 0.015 : 0.006) * dt) {
                     let bSize = en.type === "KV1" ? 60 : 40;
                     enemyBullets.push({ x: en.x + 30, y: en.y + 80, width: bSize, height: bSize, speed: en.type === "KV1" ? 7 : 5 });
                 }
@@ -174,8 +215,7 @@
                             comboCount++; comboTimer = COMBO_MAX_TIME; score += en.score + (comboCount * 5);
                             createExplosion(en.x + en.width / 2, en.y + en.height / 2, "#ff6600");
                             createScrap(en.x + en.width / 2, en.y + en.height / 2, en.type === "KV1");
-                            let dropChance = en.type === "KV1" ? 0.35 : 0.03;
-                            if (Math.random() < dropChance) spawnRepairItem(en.x + en.width / 2 - 40, en.y + en.height / 2);
+                            if (Math.random() < (en.type === "KV1" ? 0.35 : 0.03)) spawnRepairItem(en.x + en.width / 2 - 40, en.y + en.height / 2);
                             enemies.splice(i, 1); shakeDuration = 15;
                         } else { for (let k = 0; k < 5; k++) createExplosion(b.x + b.width / 2, b.y, "#ffffff"); }
                         break;
@@ -185,13 +225,13 @@
             }
 
             for (let i = enemyBullets.length - 1; i >= 0; i--) {
-                let eb = enemyBullets[i]; eb.y += eb.speed;
+                let eb = enemyBullets[i]; eb.y += eb.speed * dt;
                 if (rectIntersect(player.x + 30, player.y + 30, 40, 40, eb.x, eb.y, eb.width, eb.height)) { takeDamage(); enemyBullets.splice(i, 1); }
                 else if (eb.y > canvas.height) enemyBullets.splice(i, 1);
             }
 
-            particles.forEach((p, idx) => { p.x += p.vx; p.y += p.vy; p.vy += 0.1; p.size *= 0.96; p.alpha -= p.decay; if (p.alpha <= 0) particles.splice(idx, 1); });
-            scrapItems.forEach((s, idx) => { s.life--; if (s.type === "smoke") { s.x += s.vx; s.y += s.vy; s.alpha -= 0.005; s.size += 0.2; } else { s.x += s.vx; s.y += s.vy; s.vx *= 0.95; s.vy *= 0.95; } if (s.life <= 0) scrapItems.splice(idx, 1); });
+            particles.forEach((p, idx) => { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 0.1 * dt; p.size *= Math.pow(0.96, dt); p.alpha -= p.decay * dt; if (p.alpha <= 0) particles.splice(idx, 1); });
+            scrapItems.forEach((s, idx) => { s.life -= dt; if (s.type === "smoke") { s.x += s.vx * dt; s.y += s.vy * dt; s.alpha -= 0.005 * dt; s.size += 0.2 * dt; } else { s.x += s.vx * dt; s.y += s.vy * dt; s.vx *= Math.pow(0.95, dt); s.vy *= Math.pow(0.95, dt); } if (s.life <= 0) scrapItems.splice(idx, 1); });
         }
 
         function draw() {
@@ -201,17 +241,17 @@
             if (healEffect > 0) { ctx.fillStyle = `rgba(0, 255, 0, ${healEffect})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
 
             if (!gameStarted) { drawTitle(); } else {
-                scrapItems.forEach(s => { ctx.save(); if (s.type === "smoke") { ctx.globalAlpha = s.alpha; ctx.fillStyle = "#222"; } else { ctx.fillStyle = s.color; } ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2); ctx.fill(); ctx.restore(); });
+                scrapItems.forEach(s => { ctx.save(); if (s.type === "smoke") { ctx.globalAlpha = Math.max(0, s.alpha); ctx.fillStyle = "#222"; } else { ctx.fillStyle = s.color; } ctx.beginPath(); ctx.arc(s.x, s.y, Math.max(0, s.size), 0, Math.PI * 2); ctx.fill(); ctx.restore(); });
                 items.forEach(it => { if (repairImg.complete && repairImg.naturalWidth > 0) ctx.drawImage(repairImg, it.x, it.y, it.width, it.height); else { ctx.fillStyle = "#0f0"; ctx.fillRect(it.x + 30, it.y + 10, 20, 60); ctx.fillRect(it.x + 10, it.y + 30, 60, 20); } });
                 if (!(invincibleTimer > 0 && Math.floor(Date.now() / 100) % 2 === 0)) ctx.drawImage(playerImg, player.x, player.y + player.recoil, player.width, player.height);
                 bullets.forEach(b => ctx.drawImage(bulletImg, b.x, b.y, b.width, b.height));
                 enemyBullets.forEach(eb => ctx.drawImage(enemyBulletImg, eb.x, eb.y, eb.width, eb.height));
                 enemies.forEach(en => ctx.drawImage(en.type === "KV1" ? kv1Img : enemyImg, en.x, en.y, en.width, en.height));
-                particles.forEach(p => { ctx.globalAlpha = p.alpha; ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill(); });
+                particles.forEach(p => { ctx.globalAlpha = Math.max(0, p.alpha); ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(0, p.size), 0, Math.PI * 2); ctx.fill(); });
 
                 ctx.globalAlpha = 1.0; ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "900 24px 'Montserrat', sans-serif";
                 ctx.fillText(`SCORE: ${score}`, 10, 35); ctx.fillText(`BEST: ${highScore}`, 10, 65);
-                ctx.fillStyle = "#bc1000"; ctx.fillText("LIVES: " + "❤".repeat(lives), 10, 95);
+                ctx.fillStyle = "#bc1000"; ctx.fillText("LIVES: " + "❤".repeat(Math.max(0, lives)), 10, 95);
 
                 if (comboCount > 1) {
                     ctx.textAlign = "right"; ctx.fillStyle = comboCount >= 20 ? "#ff0000" : (comboCount >= 10 ? "#ffaa00" : "#ffcc00");
@@ -227,23 +267,14 @@
             ctx.textAlign = "center"; ctx.textBaseline = "middle";
             ctx.fillStyle = "white"; ctx.font = "900 48px 'Montserrat', sans-serif";
             ctx.fillText("PANZER VOR!", canvas.width / 2, 120);
-
-            ctx.font = "900 16px 'Montserrat', sans-serif";
-            ctx.fillStyle = "#aaa";
+            ctx.font = "900 16px 'Montserrat', sans-serif"; ctx.fillStyle = "#aaa";
             ctx.fillText("--- HOW TO PLAY ---", canvas.width / 2, 200);
-
             ctx.fillStyle = "white"; ctx.font = "700 18px 'Montserrat', sans-serif";
-            ctx.fillText("MOVE: WASD", canvas.width / 2, 240);
-            ctx.fillText("FIRE: SPACE BAR", canvas.width / 2, 275);
-
-            ctx.fillStyle = "#ffcc00";
-            ctx.fillText("10+ COMBO: DUAL SHOT", canvas.width / 2, 330);
-            ctx.fillText("20+ COMBO: 3-WAY SHOT", canvas.width / 2, 360);
-
-            // ★ここを修正：赤文字だけを点滅させる
+            ctx.fillText("MOVE: WASD / DRAG", canvas.width / 2, 240);
+            ctx.fillText("FIRE: SPACE / AUTO", canvas.width / 2, 275);
             if (Math.floor(Date.now() / 500) % 2 === 0) {
                 ctx.fillStyle = "#bc1000"; ctx.font = "900 22px 'Montserrat', sans-serif";
-                ctx.fillText("PRESS SPACE BAR TO START", canvas.width / 2, 460);
+                ctx.fillText("TAP TO START", canvas.width / 2, 460);
             }
         }
 
@@ -256,7 +287,17 @@
             ctx.fillStyle = "white"; ctx.font = "900 22px 'Montserrat', sans-serif"; ctx.fillText("REPLAY", canvas.width / 2, 375);
         }
 
-        function gameLoop() { update(); draw(); requestAnimationFrame(gameLoop); }
+        function gameLoop() {
+            const now = performance.now();
+            // 60fps(16.66ms)を1.0として、経過時間に応じた移動倍率を計算
+            const dt = (now - lastTime) / 16.66;
+            lastTime = now;
+
+            update(dt);
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
         let loadedCount = 0; const totalImages = 6;
         function checkLoad() { loadedCount++; if (loadedCount >= totalImages && !isLoopRunning) { isLoopRunning = true; gameLoop(); } }
         playerImg.onload = enemyImg.onload = kv1Img.onload = bulletImg.onload = enemyBulletImg.onload = repairImg.onload = checkLoad;
