@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>PANZER VOR! - Classic Feel</title>
+    <title>PANZER VOR!</title>
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;900&display=swap" rel="stylesheet">
     <style>
         body {
@@ -36,14 +36,17 @@
         const canvas = document.getElementById("gameCanvas");
         const ctx = canvas.getContext("2d");
 
-        let score = 0, highScore = localStorage.getItem("highScore") || 0;
-        let gameOver = false, gameStarted = false, isLoopRunning = false;
-        let lives = 3;
-        const MAX_LIVES = 5;
-        let invincibleTimer = 0;
-        let comboCount = 0, comboTimer = 0;
+        // ------------------------------------------------------------------ //
+        // 定数
+        // ------------------------------------------------------------------ //
         const COMBO_MAX_TIME = 120;
+        const MAX_LIVES = 5;
+        const SHOT_INTERVAL = 250;
+        const REPLAY_BUTTON = { x: 90, y: 350, w: 220, h: 50 };
 
+        // ------------------------------------------------------------------ //
+        // アセット
+        // ------------------------------------------------------------------ //
         const playerImg = new Image(); playerImg.src = "img/player.png";
         const enemyImg = new Image(); enemyImg.src = "img/enemy.png";
         const kv1Img = new Image(); kv1Img.src = "img/kv1.png";
@@ -52,27 +55,105 @@
         const repairImg = new Image(); repairImg.src = "img/repair.png";
 
         const bgm = new Audio("audio/bgm.mp3");
-        bgm.loop = true; bgm.volume = 0.15;
-        let isMusicPlaying = false;
+        bgm.loop = true;
+        bgm.volume = 0.15;
 
-        // --- サイズと速度をPC版(100px / speed:4)に完全準拠 ---
-        let player = { x: 150, y: 450, width: 100, height: 100, hitWidth: 40, hitHeight: 40, speed: 4, recoil: 0 };
-        let bullets = [], enemyBullets = [], enemies = [], particles = [], scrapItems = [], items = [], keys = {};
-        let touchX = null, touchY = null;
-        let lastShotTime = 0, shotInterval = 250;
-        let shakeDuration = 0, shakeIntensity = 5, healEffect = 0;
+        // ------------------------------------------------------------------ //
+        // ゲーム状態
+        // ------------------------------------------------------------------ //
+        let score, highScore, gameOver, gameStarted, isLoopRunning, isMusicPlaying;
+        let lives, invincibleTimer, comboCount, comboTimer, healEffect;
+        let shakeDuration, lastShotTime;
+        let bullets, enemyBullets, enemies, particles, scrapItems, items;
+        let keys, touchX, touchY;
+        let lastTime;
 
-        // 速度補正用の変数
-        let lastTime = performance.now();
+        const player = {
+            x: 150, y: 450,
+            width: 100, height: 100,
+            hitWidth: 40, hitHeight: 40,
+            speed: 4, recoil: 0
+        };
 
-        // 入力制御
+        // ------------------------------------------------------------------ //
+        // 初期化
+        // ------------------------------------------------------------------ //
+        function initState() {
+            score = 0;
+            highScore = parseInt(localStorage.getItem("highScore") || "0", 10);
+            gameOver = false;
+            gameStarted = false;
+            isLoopRunning = false;
+            isMusicPlaying = false;
+            lives = 3;
+            invincibleTimer = 0;
+            comboCount = 0;
+            comboTimer = 0;
+            healEffect = 0;
+            shakeDuration = 0;
+            lastShotTime = 0;
+            bullets = [];
+            enemyBullets = [];
+            enemies = [];
+            particles = [];
+            scrapItems = [];
+            items = [];
+            keys = {};
+            touchX = null;
+            touchY = null;
+            lastTime = performance.now();
+            player.x = 150;
+            player.y = 450;
+            player.recoil = 0;
+        }
+
+        function resetGame() {
+            player.x = 150;
+            player.y = 450;
+            player.recoil = 0;
+            bullets = [];
+            enemyBullets = [];
+            enemies = [];
+            particles = [];
+            scrapItems = [];
+            items = [];
+            score = 0;
+            lives = 3;
+            invincibleTimer = 0;
+            comboCount = 0;
+            comboTimer = 0;
+            healEffect = 0;
+            gameOver = false;
+            playMusic();
+        }
+
+        // ------------------------------------------------------------------ //
+        // BGM
+        // ------------------------------------------------------------------ //
+        function playMusic() {
+            if (!isMusicPlaying) {
+                bgm.play().catch(() => { });
+                isMusicPlaying = true;
+            }
+        }
+
+        function stopMusic() {
+            bgm.pause();
+            bgm.currentTime = 0;
+            isMusicPlaying = false;
+        }
+
+        // ------------------------------------------------------------------ //
+        // 入力
+        // ------------------------------------------------------------------ //
         window.addEventListener("keydown", e => {
             keys[e.code] = true;
-            if ((e.code === "Enter" || e.code === "Space")) {
-                if (!gameStarted) startGame(); else if (gameOver) resetGame();
+            if (e.code === "Enter" || e.code === "Space") {
+                if (!gameStarted) startGame();
+                else if (gameOver) resetGame();
             }
         });
-        window.addEventListener("keyup", e => keys[e.code] = false);
+        window.addEventListener("keyup", e => { keys[e.code] = false; });
 
         canvas.addEventListener("touchstart", e => {
             e.preventDefault();
@@ -86,8 +167,16 @@
             updateTouchPos(e.touches[0]);
         }, { passive: false });
 
-        canvas.addEventListener("touchend", () => {
-            touchX = null; touchY = null;
+        canvas.addEventListener("touchend", () => { touchX = null; touchY = null; });
+
+        // REPLAYボタンのクリック判定
+        canvas.addEventListener("click", e => {
+            if (!gameOver) return;
+            const rect = canvas.getBoundingClientRect();
+            const cx = (e.clientX - rect.left) * (canvas.width / rect.width);
+            const cy = (e.clientY - rect.top) * (canvas.height / rect.height);
+            const b = REPLAY_BUTTON;
+            if (cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h) resetGame();
         });
 
         function updateTouchPos(touch) {
@@ -96,213 +185,474 @@
             touchY = (touch.clientY - rect.top) * (canvas.height / rect.height);
         }
 
-        function startGame() { gameStarted = true; if (!isMusicPlaying) { bgm.play().catch(() => { }); isMusicPlaying = true; } }
-        function resetGame() {
-            player.x = 150; player.y = 450;
-            bullets = []; enemyBullets = []; enemies = []; particles = []; scrapItems = []; items = [];
-            score = 0; lives = 3; invincibleTimer = 0; comboCount = 0; comboTimer = 0; healEffect = 0; gameOver = false;
-            if (!isMusicPlaying) { bgm.play().catch(() => { }); isMusicPlaying = true; }
+        function startGame() {
+            gameStarted = true;
+            playMusic();
         }
 
-        function takeDamage() {
-            if (invincibleTimer > 0) return;
-            lives--; shakeDuration = 20; invincibleTimer = 90; comboCount = 0;
-            if (lives <= 0) triggerGameOver();
-        }
-
-        function triggerGameOver() {
-            gameOver = true; shakeDuration = 30;
-            bgm.pause(); bgm.currentTime = 0; isMusicPlaying = false;
-            if (score > highScore) { highScore = score; localStorage.setItem("highScore", highScore); }
-        }
-
-        function createExplosion(x, y, color) {
-            for (let i = 0; i < 15; i++) {
-                const angle = Math.random() * Math.PI * 2;
-                const speed = 1 + Math.random() * 4;
-                particles.push({ x: x, y: y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, size: 2 + Math.random() * 4, color: color || "#ffcc00", alpha: 1, decay: 0.02 + Math.random() * 0.02 });
-            }
-        }
-
-        function createScrap(x, y, isKV1) {
-            for (let i = 0; i < (isKV1 ? 5 : 3); i++) {
-                scrapItems.push({ x: x + (Math.random() - 0.5) * 40, y: y + (Math.random() - 0.5) * 40, vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2, size: 3 + Math.random() * 5, color: "#1a1a1a", life: 200 + Math.random() * 100, type: "armor" });
-            }
-            for (let i = 0; i < (isKV1 ? 12 : 6); i++) {
-                scrapItems.push({ x: x, y: y, vx: (Math.random() - 0.5) * 1, vy: -0.5 - Math.random() * 1, size: 10 + Math.random() * 20, alpha: 0.6, life: 100 + Math.random() * 100, type: "smoke" });
-            }
-        }
-
-        function spawnRepairItem(x, y) { items.push({ x: x, y: y, width: 80, height: 80, speed: 2 }); }
-
+        // ------------------------------------------------------------------ //
+        // ユーティリティ
+        // ------------------------------------------------------------------ //
         function rectIntersect(x1, y1, w1, h1, x2, y2, w2, h2) {
             return x2 < x1 + w1 && x2 + w2 > x1 && y2 < y1 + h1 && y2 + h2 > y1;
         }
 
+        function playerHitX() { return player.x + 30; }
+        function playerHitY() { return player.y + 30; }
+
+        // ------------------------------------------------------------------ //
+        // エフェクト生成
+        // ------------------------------------------------------------------ //
+        function createExplosion(x, y, color) {
+            for (let i = 0; i < 15; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 1 + Math.random() * 4;
+                particles.push({
+                    x, y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    size: 2 + Math.random() * 4,
+                    color: color || "#ffcc00",
+                    alpha: 1,
+                    decay: 0.02 + Math.random() * 0.02
+                });
+            }
+        }
+
+        function createScrap(x, y, isKV1) {
+            const armorCount = isKV1 ? 5 : 3;
+            const smokeCount = isKV1 ? 12 : 6;
+            for (let i = 0; i < armorCount; i++) {
+                scrapItems.push({
+                    x: x + (Math.random() - 0.5) * 40,
+                    y: y + (Math.random() - 0.5) * 40,
+                    vx: (Math.random() - 0.5) * 2,
+                    vy: (Math.random() - 0.5) * 2,
+                    size: 3 + Math.random() * 5,
+                    color: "#1a1a1a",
+                    life: 200 + Math.random() * 100,
+                    type: "armor"
+                });
+            }
+            for (let i = 0; i < smokeCount; i++) {
+                scrapItems.push({
+                    x, y,
+                    vx: (Math.random() - 0.5) * 1,
+                    vy: -0.5 - Math.random() * 1,
+                    size: 10 + Math.random() * 20,
+                    alpha: 0.6,
+                    life: 100 + Math.random() * 100,
+                    type: "smoke"
+                });
+            }
+        }
+
+        function spawnRepairItem(x, y) {
+            items.push({ x, y, width: 80, height: 80, speed: 2 });
+        }
+
+        // ------------------------------------------------------------------ //
+        // ダメージ・ゲームオーバー
+        // ------------------------------------------------------------------ //
+        function takeDamage() {
+            if (invincibleTimer > 0) return;
+            lives--;
+            shakeDuration = 20;
+            invincibleTimer = 90;
+            comboCount = 0;
+            if (lives <= 0) triggerGameOver();
+        }
+
+        function triggerGameOver() {
+            gameOver = true;
+            shakeDuration = 30;
+            stopMusic();
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem("highScore", highScore);
+            }
+        }
+
+        // ------------------------------------------------------------------ //
+        // 弾発射
+        // ------------------------------------------------------------------ //
+        function fireBullets() {
+            const now = Date.now();
+            if (now - lastShotTime <= SHOT_INTERVAL) return;
+            lastShotTime = now;
+            player.recoil = 10;
+
+            const mkBullet = (ox, oy, vx, vy) => ({
+                x: player.x + ox, y: player.y + oy,
+                width: 40, height: 40, vx, vy
+            });
+
+            if (comboCount >= 20) {
+                bullets.push(mkBullet(30, 0, 0, -7));
+                bullets.push(mkBullet(10, 10, -1.5, -6.5));
+                bullets.push(mkBullet(50, 10, 1.5, -6.5));
+            } else if (comboCount >= 10) {
+                bullets.push(mkBullet(15, 0, 0, -7));
+                bullets.push(mkBullet(45, 0, 0, -7));
+            } else {
+                bullets.push(mkBullet(30, 0, 0, -7));
+            }
+        }
+
+        // ------------------------------------------------------------------ //
+        // 敵スポーン
+        // ------------------------------------------------------------------ //
+        function trySpawnEnemy(dt) {
+            if (enemies.length >= 6) return;
+            const spawnRate = Math.min(0.02 + score / 10000, 0.1);
+            if (Math.random() >= spawnRate * dt) return;
+
+            const isKV1 = Math.random() < 0.12;
+            enemies.push({
+                x: Math.random() * (canvas.width - 100),
+                y: -120,
+                width: isKV1 ? 120 : 100,
+                height: isKV1 ? 120 : 100,
+                hitWidth: isKV1 ? 80 : 60,
+                hitHeight: isKV1 ? 80 : 60,
+                speed: isKV1 ? 1.5 : 2 + Math.min(score / 2000, 3.5),
+                hp: isKV1 ? 3 : 1,
+                type: isKV1 ? "KV1" : "normal",
+                score: isKV1 ? 50 : 10
+            });
+        }
+
+        // ------------------------------------------------------------------ //
+        // 更新
+        // ------------------------------------------------------------------ //
         function update(dt) {
             if (!gameStarted || gameOver) return;
+
+            // コンボタイマー
             if (comboTimer > 0) comboTimer -= dt; else comboCount = 0;
             if (healEffect > 0) healEffect -= 0.02 * dt;
 
-            // PC移動
+            // プレイヤー移動（キーボード）
             if ((keys["KeyW"] || keys["ArrowUp"]) && player.y > 0) player.y -= player.speed * dt;
             if ((keys["KeyS"] || keys["ArrowDown"]) && player.y < canvas.height - player.height) player.y += player.speed * dt;
             if ((keys["KeyA"] || keys["ArrowLeft"]) && player.x > 0) player.x -= player.speed * dt;
             if ((keys["KeyD"] || keys["ArrowRight"]) && player.x < canvas.width - player.width) player.x += player.speed * dt;
 
-            // スマホ移動 (PC版の速度感に合わせるため追従をマイルドに)
+            // プレイヤー移動（タッチ）
             if (touchX !== null && touchY !== null) {
-                const targetX = touchX - player.width / 2;
-                const targetY = touchY - player.height / 2 - 40;
-                player.x += (targetX - player.x) * 0.1 * dt;
-                player.y += (targetY - player.y) * 0.1 * dt;
+                const tx = touchX - player.width / 2;
+                const ty = touchY - player.height / 2 - 40;
+                player.x += (tx - player.x) * 0.1 * dt;
+                player.y += (ty - player.y) * 0.1 * dt;
                 player.x = Math.max(0, Math.min(canvas.width - player.width, player.x));
                 player.y = Math.max(0, Math.min(canvas.height - player.height, player.y));
             }
 
-            if (player.recoil > 0) player.recoil *= Math.pow(0.8, dt);
+            if (player.recoil > 0) player.recoil *= 0.8;  // dt≒1 前提で定数化
             if (invincibleTimer > 0) invincibleTimer -= dt;
 
-            const isFiring = keys["Space"] || (touchX !== null);
-            if (isFiring) {
-                const now = Date.now();
-                if (now - lastShotTime > shotInterval) {
-                    if (comboCount >= 20) {
-                        bullets.push({ x: player.x + 30, y: player.y, width: 40, height: 40, vx: 0, vy: -7 });
-                        bullets.push({ x: player.x + 10, y: player.y + 10, width: 40, height: 40, vx: -1.5, vy: -6.5 });
-                        bullets.push({ x: player.x + 50, y: player.y + 10, width: 40, height: 40, vx: 1.5, vy: -6.5 });
-                    } else if (comboCount >= 10) {
-                        bullets.push({ x: player.x + 15, y: player.y, width: 40, height: 40, vx: 0, vy: -7 });
-                        bullets.push({ x: player.x + 45, y: player.y, width: 40, height: 40, vx: 0, vy: -7 });
-                    } else {
-                        bullets.push({ x: player.x + 30, y: player.y, width: 40, height: 40, vx: 0, vy: -7 });
-                    }
-                    lastShotTime = now; player.recoil = 10;
-                }
-            }
+            // 発射
+            if (keys["Space"] || touchX !== null) fireBullets();
 
+            // 自弾更新
             for (let i = bullets.length - 1; i >= 0; i--) {
-                bullets[i].x += bullets[i].vx * dt; bullets[i].y += bullets[i].vy * dt;
-                if (bullets[i].y < -40 || bullets[i].x < -40 || bullets[i].x > canvas.width) bullets.splice(i, 1);
+                const b = bullets[i];
+                b.x += b.vx * dt;
+                b.y += b.vy * dt;
+                if (b.y < -40 || b.x < -40 || b.x > canvas.width) bullets.splice(i, 1);
             }
 
+            // アイテム更新
             for (let i = items.length - 1; i >= 0; i--) {
-                let it = items[i]; it.y += it.speed * dt;
+                const it = items[i];
+                it.y += it.speed * dt;
                 if (rectIntersect(player.x + 10, player.y + 10, 80, 80, it.x, it.y, it.width, it.height)) {
-                    if (lives < MAX_LIVES) { lives++; healEffect = 0.4; } else { score += 500; healEffect = 0.15; }
+                    if (lives < MAX_LIVES) { lives++; healEffect = 0.4; }
+                    else { score += 500; healEffect = 0.15; }
                     items.splice(i, 1);
-                } else if (it.y > canvas.height) items.splice(i, 1);
+                } else if (it.y > canvas.height) {
+                    items.splice(i, 1);
+                }
             }
 
-            let spawnRate = Math.min(0.02 + (score / 10000), 0.1);
-            if (Math.random() < spawnRate * dt && enemies.length < 6) {
-                const isKV1 = Math.random() < 0.12;
-                enemies.push({ x: Math.random() * (canvas.width - 100), y: -120, width: isKV1 ? 120 : 100, height: isKV1 ? 120 : 100, hitWidth: isKV1 ? 80 : 60, hitHeight: isKV1 ? 80 : 60, speed: isKV1 ? 1.5 : (2 + Math.min(score / 2000, 3.5)), hp: isKV1 ? 3 : 1, type: isKV1 ? "KV1" : "normal", score: isKV1 ? 50 : 10 });
-            }
+            // 敵スポーン
+            trySpawnEnemy(dt);
 
+            // 敵更新
             for (let i = enemies.length - 1; i >= 0; i--) {
-                let en = enemies[i]; en.y += en.speed * dt;
-                if (Math.random() < (en.type === "KV1" ? 0.015 : 0.006) * dt) {
-                    let bSize = en.type === "KV1" ? 60 : 40;
-                    enemyBullets.push({ x: en.x + 30, y: en.y + 80, width: bSize, height: bSize, speed: en.type === "KV1" ? 7 : 5 });
+                const en = enemies[i];
+                en.y += en.speed * dt;
+
+                // 敵弾発射
+                const shootProb = (en.type === "KV1" ? 0.015 : 0.006) * dt;
+                if (Math.random() < shootProb) {
+                    const bSize = en.type === "KV1" ? 60 : 40;
+                    enemyBullets.push({
+                        x: en.x + 30, y: en.y + 80,
+                        width: bSize, height: bSize,
+                        speed: en.type === "KV1" ? 7 : 5
+                    });
                 }
-                if (rectIntersect(player.x + 30, player.y + 30, 40, 40, en.x + (en.width - en.hitWidth) / 2, en.y + (en.height - en.hitHeight) / 2, en.hitWidth, en.hitHeight)) takeDamage();
+
+                // プレイヤーとの衝突
+                const ehx = en.x + (en.width - en.hitWidth) / 2;
+                const ehy = en.y + (en.height - en.hitHeight) / 2;
+                if (rectIntersect(playerHitX(), playerHitY(), 40, 40, ehx, ehy, en.hitWidth, en.hitHeight)) {
+                    takeDamage();
+                }
+
+                // 自弾との衝突
+                let killed = false;
                 for (let bi = bullets.length - 1; bi >= 0; bi--) {
-                    let b = bullets[bi];
-                    if (rectIntersect(en.x + (en.width - en.hitWidth) / 2, en.y + (en.height - en.hitHeight) / 2, en.hitWidth, en.hitHeight, b.x, b.y, b.width, b.height)) {
-                        bullets.splice(bi, 1); en.hp--;
-                        if (en.hp <= 0) {
-                            comboCount++; comboTimer = COMBO_MAX_TIME; score += en.score + (comboCount * 5);
-                            createExplosion(en.x + en.width / 2, en.y + en.height / 2, "#ff6600");
-                            createScrap(en.x + en.width / 2, en.y + en.height / 2, en.type === "KV1");
-                            if (Math.random() < (en.type === "KV1" ? 0.35 : 0.03)) spawnRepairItem(en.x + en.width / 2 - 40, en.y + en.height / 2);
-                            enemies.splice(i, 1); shakeDuration = 15;
-                        } else { for (let k = 0; k < 5; k++) createExplosion(b.x + b.width / 2, b.y, "#ffffff"); }
-                        break;
+                    const b = bullets[bi];
+                    if (!rectIntersect(ehx, ehy, en.hitWidth, en.hitHeight, b.x, b.y, b.width, b.height)) continue;
+
+                    bullets.splice(bi, 1);
+                    en.hp--;
+
+                    if (en.hp <= 0) {
+                        comboCount++;
+                        comboTimer = COMBO_MAX_TIME;
+                        score += en.score + comboCount * 5;
+                        createExplosion(en.x + en.width / 2, en.y + en.height / 2, "#ff6600");
+                        createScrap(en.x + en.width / 2, en.y + en.height / 2, en.type === "KV1");
+                        const dropChance = en.type === "KV1" ? 0.35 : 0.03;
+                        if (Math.random() < dropChance) spawnRepairItem(en.x + en.width / 2 - 40, en.y + en.height / 2);
+                        enemies.splice(i, 1);
+                        shakeDuration = 15;
+                        killed = true;
+                    } else {
+                        for (let k = 0; k < 5; k++) createExplosion(b.x + b.width / 2, b.y, "#ffffff");
                     }
+                    break;
                 }
-                if (en && en.y > canvas.height) enemies.splice(i, 1);
+
+                // 画面外に出た敵を除去（撃破済みは除く）
+                if (!killed && en.y > canvas.height) enemies.splice(i, 1);
             }
 
+            // 敵弾更新
             for (let i = enemyBullets.length - 1; i >= 0; i--) {
-                let eb = enemyBullets[i]; eb.y += eb.speed * dt;
-                if (rectIntersect(player.x + 30, player.y + 30, 40, 40, eb.x, eb.y, eb.width, eb.height)) { takeDamage(); enemyBullets.splice(i, 1); }
-                else if (eb.y > canvas.height) enemyBullets.splice(i, 1);
+                const eb = enemyBullets[i];
+                eb.y += eb.speed * dt;
+                if (rectIntersect(playerHitX(), playerHitY(), 40, 40, eb.x, eb.y, eb.width, eb.height)) {
+                    takeDamage();
+                    enemyBullets.splice(i, 1);
+                } else if (eb.y > canvas.height) {
+                    enemyBullets.splice(i, 1);
+                }
             }
 
-            particles.forEach((p, idx) => { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 0.1 * dt; p.size *= Math.pow(0.96, dt); p.alpha -= p.decay * dt; if (p.alpha <= 0) particles.splice(idx, 1); });
-            scrapItems.forEach((s, idx) => { s.life -= dt; if (s.type === "smoke") { s.x += s.vx * dt; s.y += s.vy * dt; s.alpha -= 0.005 * dt; s.size += 0.2 * dt; } else { s.x += s.vx * dt; s.y += s.vy * dt; s.vx *= Math.pow(0.95, dt); s.vy *= Math.pow(0.95, dt); } if (s.life <= 0) scrapItems.splice(idx, 1); });
+            // パーティクル更新（逆順ループで安全にsplice）
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+                p.vy += 0.1 * dt;
+                p.size *= 0.96;
+                p.alpha -= p.decay * dt;
+                if (p.alpha <= 0) particles.splice(i, 1);
+            }
+
+            // スクラップ更新（逆順ループで安全にsplice）
+            for (let i = scrapItems.length - 1; i >= 0; i--) {
+                const s = scrapItems[i];
+                s.life -= dt;
+                if (s.type === "smoke") {
+                    s.x += s.vx * dt;
+                    s.y += s.vy * dt;
+                    s.alpha -= 0.005 * dt;
+                    s.size += 0.2 * dt;
+                } else {
+                    s.x += s.vx * dt;
+                    s.y += s.vy * dt;
+                    s.vx *= 0.95;
+                    s.vy *= 0.95;
+                }
+                if (s.life <= 0) scrapItems.splice(i, 1);
+            }
         }
 
+        // ------------------------------------------------------------------ //
+        // 描画
+        // ------------------------------------------------------------------ //
         function draw() {
             ctx.save();
-            if (shakeDuration > 0) { ctx.translate((Math.random() - 0.5) * shakeIntensity, (Math.random() - 0.5) * shakeIntensity); shakeDuration--; }
-            ctx.fillStyle = "#000"; ctx.fillRect(-50, -50, canvas.width + 100, canvas.height + 100);
-            if (healEffect > 0) { ctx.fillStyle = `rgba(0, 255, 0, ${healEffect})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
 
-            if (!gameStarted) { drawTitle(); } else {
-                scrapItems.forEach(s => { ctx.save(); if (s.type === "smoke") { ctx.globalAlpha = Math.max(0, s.alpha); ctx.fillStyle = "#222"; } else { ctx.fillStyle = s.color; } ctx.beginPath(); ctx.arc(s.x, s.y, Math.max(0, s.size), 0, Math.PI * 2); ctx.fill(); ctx.restore(); });
-                items.forEach(it => { if (repairImg.complete && repairImg.naturalWidth > 0) ctx.drawImage(repairImg, it.x, it.y, it.width, it.height); else { ctx.fillStyle = "#0f0"; ctx.fillRect(it.x + 30, it.y + 10, 20, 60); ctx.fillRect(it.x + 10, it.y + 30, 60, 20); } });
-                if (!(invincibleTimer > 0 && Math.floor(Date.now() / 100) % 2 === 0)) ctx.drawImage(playerImg, player.x, player.y + player.recoil, player.width, player.height);
-                bullets.forEach(b => ctx.drawImage(bulletImg, b.x, b.y, b.width, b.height));
-                enemyBullets.forEach(eb => ctx.drawImage(enemyBulletImg, eb.x, eb.y, eb.width, eb.height));
-                enemies.forEach(en => ctx.drawImage(en.type === "KV1" ? kv1Img : enemyImg, en.x, en.y, en.width, en.height));
-                particles.forEach(p => { ctx.globalAlpha = Math.max(0, p.alpha); ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(0, p.size), 0, Math.PI * 2); ctx.fill(); });
-
-                ctx.globalAlpha = 1.0; ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "900 24px 'Montserrat', sans-serif";
-                ctx.fillText(`SCORE: ${score}`, 10, 35); ctx.fillText(`BEST: ${highScore}`, 10, 65);
-                ctx.fillStyle = "#bc1000"; ctx.fillText("LIVES: " + "❤".repeat(Math.max(0, lives)), 10, 95);
-
-                if (comboCount > 1) {
-                    ctx.textAlign = "right"; ctx.fillStyle = comboCount >= 20 ? "#ff0000" : (comboCount >= 10 ? "#ffaa00" : "#ffcc00");
-                    ctx.font = "900 40px 'Montserrat', sans-serif"; ctx.fillText(`${comboCount} COMBO`, canvas.width - 20, 150);
-                    ctx.fillRect(canvas.width - 120, 165, 100 * (comboTimer / COMBO_MAX_TIME), 8);
-                }
-                if (gameOver) drawGameOver();
+            if (shakeDuration > 0) {
+                ctx.translate(
+                    (Math.random() - 0.5) * 5,
+                    (Math.random() - 0.5) * 5
+                );
+                shakeDuration--;
             }
+
+            // 背景クリア
+            ctx.fillStyle = "#000";
+            ctx.fillRect(-50, -50, canvas.width + 100, canvas.height + 100);
+
+            // 回復エフェクト
+            if (healEffect > 0) {
+                ctx.fillStyle = `rgba(0, 255, 0, ${healEffect})`;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            if (!gameStarted) {
+                drawTitle();
+                ctx.restore();
+                return;
+            }
+
+            // スクラップ
+            for (const s of scrapItems) {
+                ctx.save();
+                if (s.type === "smoke") {
+                    ctx.globalAlpha = Math.max(0, s.alpha);
+                    ctx.fillStyle = "#222";
+                } else {
+                    ctx.fillStyle = s.color;
+                }
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, Math.max(0, s.size), 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            // アイテム
+            for (const it of items) {
+                if (repairImg.complete && repairImg.naturalWidth > 0) {
+                    ctx.drawImage(repairImg, it.x, it.y, it.width, it.height);
+                } else {
+                    ctx.fillStyle = "#0f0";
+                    ctx.fillRect(it.x + 30, it.y + 10, 20, 60);
+                    ctx.fillRect(it.x + 10, it.y + 30, 60, 20);
+                }
+            }
+
+            // プレイヤー（無敵点滅）
+            const blink = invincibleTimer > 0 && Math.floor(Date.now() / 100) % 2 === 0;
+            if (!blink) ctx.drawImage(playerImg, player.x, player.y + player.recoil, player.width, player.height);
+
+            // 自弾
+            for (const b of bullets) ctx.drawImage(bulletImg, b.x, b.y, b.width, b.height);
+            // 敵弾
+            for (const eb of enemyBullets) ctx.drawImage(enemyBulletImg, eb.x, eb.y, eb.width, eb.height);
+            // 敵
+            for (const en of enemies) ctx.drawImage(en.type === "KV1" ? kv1Img : enemyImg, en.x, en.y, en.width, en.height);
+
+            // パーティクル
+            for (const p of particles) {
+                ctx.globalAlpha = Math.max(0, p.alpha);
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, Math.max(0, p.size), 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // HUD
+            ctx.globalAlpha = 1.0;
+            ctx.textAlign = "left";
+            ctx.fillStyle = "#fff";
+            ctx.font = "900 24px 'Montserrat', sans-serif";
+            ctx.fillText(`SCORE: ${score}`, 10, 35);
+            ctx.fillText(`BEST: ${highScore}`, 10, 65);
+            ctx.fillStyle = "#bc1000";
+            ctx.fillText("LIVES: " + "❤".repeat(Math.max(0, lives)), 10, 95);
+
+            // コンボ表示
+            if (comboCount > 1) {
+                ctx.textAlign = "right";
+                ctx.fillStyle = comboCount >= 20 ? "#ff0000" : (comboCount >= 10 ? "#ffaa00" : "#ffcc00");
+                ctx.font = "900 40px 'Montserrat', sans-serif";
+                ctx.fillText(`${comboCount} COMBO`, canvas.width - 20, 150);
+                ctx.fillRect(canvas.width - 120, 165, 100 * (comboTimer / COMBO_MAX_TIME), 8);
+            }
+
+            if (gameOver) drawGameOver();
+
             ctx.restore();
         }
 
         function drawTitle() {
-            ctx.textAlign = "center"; ctx.textBaseline = "middle";
-            ctx.fillStyle = "white"; ctx.font = "900 48px 'Montserrat', sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillStyle = "white";
+            ctx.font = "900 48px 'Montserrat', sans-serif";
             ctx.fillText("PANZER VOR!", canvas.width / 2, 120);
-            ctx.font = "900 16px 'Montserrat', sans-serif"; ctx.fillStyle = "#aaa";
+            ctx.font = "900 16px 'Montserrat', sans-serif";
+            ctx.fillStyle = "#aaa";
             ctx.fillText("--- HOW TO PLAY ---", canvas.width / 2, 200);
-            ctx.fillStyle = "white"; ctx.font = "700 18px 'Montserrat', sans-serif";
+            ctx.fillStyle = "white";
+            ctx.font = "700 18px 'Montserrat', sans-serif";
             ctx.fillText("MOVE: WASD / DRAG", canvas.width / 2, 240);
             ctx.fillText("FIRE: SPACE / AUTO", canvas.width / 2, 275);
             if (Math.floor(Date.now() / 500) % 2 === 0) {
-                ctx.fillStyle = "#bc1000"; ctx.font = "900 22px 'Montserrat', sans-serif";
-                ctx.fillText("TAP TO START", canvas.width / 2, 460);
+                ctx.fillStyle = "#bc1000";
+                ctx.font = "900 22px 'Montserrat', sans-serif";
+                ctx.fillText("SPACE / TAP TO START", canvas.width / 2, 460);
             }
         }
 
         function drawGameOver() {
-            ctx.fillStyle = "rgba(0, 0, 0, 0.7)"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#bc1000";
-            ctx.font = "900 48px 'Montserrat', sans-serif"; ctx.fillText("GAME OVER", canvas.width / 2, 200);
-            ctx.fillStyle = "white"; ctx.font = "900 30px 'Montserrat', sans-serif"; ctx.fillText(`SCORE: ${score}`, canvas.width / 2, 270);
-            ctx.fillStyle = "#bc1000"; ctx.fillRect(90, 350, 220, 50); ctx.strokeStyle = "white"; ctx.lineWidth = 2; ctx.strokeRect(90, 350, 220, 50);
-            ctx.fillStyle = "white"; ctx.font = "900 22px 'Montserrat', sans-serif"; ctx.fillText("REPLAY", canvas.width / 2, 375);
+            ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillStyle = "#bc1000";
+            ctx.font = "900 48px 'Montserrat', sans-serif";
+            ctx.fillText("GAME OVER", canvas.width / 2, 200);
+            ctx.fillStyle = "white";
+            ctx.font = "900 30px 'Montserrat', sans-serif";
+            ctx.fillText(`SCORE: ${score}`, canvas.width / 2, 270);
+
+            // REPLAYボタン
+            const b = REPLAY_BUTTON;
+            ctx.fillStyle = "#bc1000";
+            ctx.fillRect(b.x, b.y, b.w, b.h);
+            ctx.strokeStyle = "white";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(b.x, b.y, b.w, b.h);
+            ctx.fillStyle = "white";
+            ctx.font = "900 22px 'Montserrat', sans-serif";
+            ctx.fillText("REPLAY", canvas.width / 2, b.y + b.h / 2);
         }
 
+        // ------------------------------------------------------------------ //
+        // ゲームループ
+        // ------------------------------------------------------------------ //
         function gameLoop() {
             const now = performance.now();
-            // 60fps(16.66ms)を1.0として、経過時間に応じた移動倍率を計算
             const dt = (now - lastTime) / 16.66;
             lastTime = now;
-
             update(dt);
             draw();
             requestAnimationFrame(gameLoop);
         }
 
-        let loadedCount = 0; const totalImages = 6;
-        function checkLoad() { loadedCount++; if (loadedCount >= totalImages && !isLoopRunning) { isLoopRunning = true; gameLoop(); } }
-        playerImg.onload = enemyImg.onload = kv1Img.onload = bulletImg.onload = enemyBulletImg.onload = repairImg.onload = checkLoad;
-        setTimeout(() => { if (!isLoopRunning) { isLoopRunning = true; gameLoop(); } }, 2000);
+        // ------------------------------------------------------------------ //
+        // 起動
+        // ------------------------------------------------------------------ //
+        initState();
+
+        let loadedCount = 0;
+        const totalImages = 6;
+        function checkLoad() {
+            loadedCount++;
+            if (loadedCount >= totalImages && !isLoopRunning) {
+                isLoopRunning = true;
+                gameLoop();
+            }
+        }
+        playerImg.onload = checkLoad;
+        enemyImg.onload = checkLoad;
+        kv1Img.onload = checkLoad;
+        bulletImg.onload = checkLoad;
+        enemyBulletImg.onload = checkLoad;
+        repairImg.onload = checkLoad;
+
+        // 画像が揃わなくても2秒後に起動
+        setTimeout(() => {
+            if (!isLoopRunning) { isLoopRunning = true; gameLoop(); }
+        }, 2000);
     </script>
 </body>
-
-</html>
